@@ -76,6 +76,24 @@ pub enum DockTab {
     Libraries,
 }
 
+impl DockTab {
+    /// The tab's panel id (`window.panel`), English label and icon (when the dock is collapsed).
+    pub fn info(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            DockTab::Properties => ("properties", "Properties", "dc-options"),
+            DockTab::Layers => ("layers", "Layers", "layers"),
+            DockTab::Libraries => ("libraries", "Libraries", "library"),
+        }
+    }
+
+    pub const ALL: [DockTab; 3] = [DockTab::Properties, DockTab::Layers, DockTab::Libraries];
+
+    /// The tab whose panel id is `id`.
+    pub fn from_id(id: &str) -> Option<DockTab> {
+        DockTab::ALL.into_iter().find(|t| t.info().0 == id)
+    }
+}
+
 /// Panels that live as collapsed icons in the dock (Essentials Classic).
 pub const ICON_PANELS: &[(&str, &str, &str)] = &[
     ("color", "Color", "palette"),
@@ -219,7 +237,12 @@ pub struct UiState {
     pub legacy_language: Option<String>,
     pub brightness: Brightness,
     pub dock_tab: DockTab,
-    /// Icon panel currently popped out of the collapsed column.
+    /// The dock's tabbed group (Properties | Layers | Libraries) is collapsed to icons at the top of
+    /// the icon column (the dock's double arrow, `window.collapseDock`).
+    #[serde(default)]
+    pub dock_collapsed: bool,
+    /// Icon panel currently popped out of the collapsed column (also `properties`, `layers` or
+    /// `libraries` while the dock is collapsed).
     pub open_panel: Option<String>,
     pub control_bar: bool,
     pub toolbar: bool,
@@ -275,6 +298,9 @@ pub struct UiState {
     /// Type → Recent Fonts, most recent first.
     #[serde(default)]
     pub recent_fonts: Vec<String>,
+    /// Families starred in the font menus (the ★ filter shows only these).
+    #[serde(default)]
+    pub favorite_fonts: Vec<String>,
     /// Engine preferences (Edit → Preferences), persisted alongside the UI state.
     #[serde(default)]
     pub engine_prefs: Value,
@@ -316,6 +342,12 @@ pub struct UiState {
     /// becoming active, leaves it.
     #[serde(skip)]
     pub home: Option<(Option<u64>, usize)>,
+    /// Layers panel › Panel Options… (row size, thumbnails, Show Layers Only).
+    #[serde(default)]
+    pub layers_panel: crate::panels::layers::PanelOptions,
+    /// The Layers panel's open rows, per open document (`DocState::uid` → node ids).
+    #[serde(skip)]
+    pub layers_expanded: std::collections::HashMap<u64, std::collections::HashSet<u64>>,
     /// The desktop window's size, position and maximized state, saved when the app quits and
     /// restored at the next launch (the desktop host reads and writes it; none on the web).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -358,6 +390,7 @@ impl Default for UiState {
             legacy_language: None,
             brightness: Brightness::MediumDark,
             dock_tab: DockTab::Properties,
+            dock_collapsed: false,
             open_panel: None,
             control_bar: false,
             toolbar: true,
@@ -386,6 +419,7 @@ impl Default for UiState {
             custom_workspaces: vec![],
             recent_files: vec![],
             recent_fonts: vec![],
+            favorite_fonts: vec![],
             engine_prefs: Value::Null,
             color_guide: Default::default(),
             library_panel: None,
@@ -398,6 +432,8 @@ impl Default for UiState {
             eps_options: Value::Null,
             dxf_import: Value::Null,
             home: None,
+            layers_panel: Default::default(),
+            layers_expanded: Default::default(),
             window: None,
         }
     }

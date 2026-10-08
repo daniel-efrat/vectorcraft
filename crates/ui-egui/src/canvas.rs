@@ -399,7 +399,7 @@ fn cursor_icon(c: Cursor) -> egui::CursorIcon {
         Cursor::ResizeNwSe => C::ResizeNwSe,
         Cursor::ResizeNeSw => C::ResizeNeSw,
         Cursor::Rotate => C::Alias,
-        Cursor::Pen | Cursor::PenAdd | Cursor::PenDelete | Cursor::PenClose | Cursor::PenContinue => C::Crosshair,
+        Cursor::Pen | Cursor::PenAdd | Cursor::PenDelete | Cursor::PenClose | Cursor::PenContinue | Cursor::PenConvert => C::Crosshair,
         Cursor::Text => C::Text,
         Cursor::Hand => C::Grab,
         Cursor::HandGrab => C::Grabbing,
@@ -560,7 +560,7 @@ fn handle_input(app: &mut VectorcraftApp, ui: &Ui, resp: &egui::Response, rect: 
                     if matches!(d, Drag::TempSelect | Drag::Art { temp: true })
                         && let Some(prev) = ui.data(|dd| dd.get_temp::<String>(temp_tool_id()))
                     {
-                        app.select_tool(&prev);
+                        app.restore_tool(&prev);
                     }
                 }
                 Drag::Pan { .. } | Drag::RotateView { .. } => {}
@@ -614,6 +614,14 @@ fn drag_art_out(app: &mut VectorcraftApp, ui: &Ui, resp: &egui::Response, p: Pos
 /// Send a pointer event to the active tool and act on UI requests (dialogs, tool switches).
 pub fn dispatch(app: &mut VectorcraftApp, ev: &PointerEvent, view: vectorcraft_engine::ViewInfo) {
     let r = app.session.pointer(ev, view);
+    // The artboard the Artboard tool makes active is the active one (the navigator's, the
+    // Artboards panel's).
+    if app.session.tool_id() == "artboard"
+        && let Some(i) = app.session.tool_options()["active"].as_u64().and_then(|i| usize::try_from(i).ok())
+        && let Some(v) = app.view_mut()
+    {
+        v.artboard = i;
+    }
     apply_requests(app, r);
 }
 
@@ -957,6 +965,10 @@ fn panel_drop(app: &mut VectorcraftApp, ui: &Ui, resp: &egui::Response, xf: &Xf)
         widgets::PanelDrag::GraphicStyle(name) => {
             let add = ui.input(|i| i.modifiers.alt);
             ("graphicStyle.apply", json!({"name": name, "ids": [hit.top_object(st.isolation).0], "add": add}))
+        }
+        // A brush from the Brushes panel: the path it lands on takes it (a compound path as a whole).
+        widgets::PanelDrag::Brush { name, .. } => {
+            ("brush.apply", json!({"name": name, "ids": [vectorcraft_tools::xform::paint_owner(&st.doc, hit.leaf).0]}))
         }
         // Art dragged back onto the canvas: its move was already dropped. (A symbol was placed
         // above.)
@@ -1412,6 +1424,9 @@ fn task_bar(app: &mut VectorcraftApp, ui: &mut Ui, xf: &Xf) {
     let is_group = first.as_ref().is_some_and(|f| matches!(f.kind, NodeKind::Group { .. }));
     let is_text = first.as_ref().is_some_and(|f| matches!(f.kind, NodeKind::Text(_)));
     let mut items: Vec<(&str, &str, &str)> = vec![]; // (label, icon, command)
+    if !st.selection.anchors.is_empty() {
+        items.push((tl!("Remove Anchor Points"), "dc-pen-delete", "path.removeAnchors"));
+    }
     if n > 1 {
         items.push((tl!("Group"), "group", "object.group"));
         items.push((tl!("Unite"), "squares-unite", "object.pathfinder.unite"));
@@ -1656,6 +1671,50 @@ mod tests {
     }
 
     #[test]
+    fn space_pressed_mid_drag_moves_what_the_tool_draws() {
+        use egui::{Event, Modifiers};
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+        app.ui.view.smart_guides = false;
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, vec![]);
+        let xf = Xf::new(app.canvas_rect.unwrap(), app.view().unwrap());
+        let space = |pressed| Event::Key { key: egui::Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+        let button = |pos, pressed| Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        // Press at `a`, drag to `b`, then hold Space while moving on by `by` and let go of both.
+        let draw = |app: &mut VectorcraftApp, a: Pos2, b: Pos2, by: egui::Vec2| {
+            frame(app, &ctx, vec![Event::PointerMoved(a)]);
+            frame(app, &ctx, vec![button(a, true)]);
+            frame(app, &ctx, vec![Event::PointerMoved(b)]);
+            frame(app, &ctx, vec![space(true)]);
+            frame(app, &ctx, vec![Event::PointerMoved(b + by)]);
+            frame(app, &ctx, vec![space(false)]);
+            frame(app, &ctx, vec![button(b + by, false)]);
+        };
+        let near = |p: Point, q: Point| p.distance(q) < 1e-3;
+        let at = app.canvas_rect.unwrap().center() - vec2(100.0, 60.0);
+        let center = app.view().unwrap().center;
+        // The rectangle moves at its size instead of growing, and the view doesn't pan.
+        app.select_tool("rectangle");
+        draw(&mut app, at, at + vec2(80.0, 40.0), vec2(30.0, 20.0));
+        assert_eq!(app.view().unwrap().center, center, "Space during a drag doesn't pan");
+        let st = app.session.active().unwrap();
+        let r = st.doc.node(st.selection.objects[0]).unwrap().path_data().unwrap().bounds().unwrap();
+        assert!(
+            near(Point::new(r.x0, r.y0), xf.to_doc(at + vec2(30.0, 20.0))) && near(Point::new(r.x1, r.y1), xf.to_doc(at + vec2(110.0, 60.0))),
+            "{r:?}"
+        );
+        // The Pen's anchor being dragged out moves, handles and all.
+        app.session.execute("select.none", &json!({})).unwrap();
+        app.select_tool("pen");
+        let a = at + vec2(0.0, 120.0);
+        draw(&mut app, a, a + vec2(40.0, 0.0), vec2(20.0, 10.0));
+        let st = app.session.active().unwrap();
+        let anchor = st.doc.node(st.selection.objects[0]).unwrap().path_data().unwrap().subpaths[0].anchors[0];
+        assert!(near(anchor.p, xf.to_doc(a + vec2(20.0, 10.0))) && near(anchor.h_out, xf.to_doc(a + vec2(60.0, 10.0))), "{anchor:?}");
+    }
+
+    #[test]
     fn double_clicking_type_with_the_selection_tool_puts_the_caret_there() {
         let mut app = VectorcraftApp::new(Session::new(), Default::default());
         app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
@@ -1715,6 +1774,34 @@ mod tests {
         assert!(matches!(&n.kind, NodeKind::SymbolInstance { symbol, .. } if *symbol == name));
         let c = n.geometric_bounds().unwrap().center();
         assert!((c - xf.to_doc(at)).hypot() < 1e-6, "{c:?}");
+    }
+
+    #[test]
+    fn a_brush_dropped_on_a_path_is_applied_to_it() {
+        let mut app = VectorcraftApp::new(Session::new(), Default::default());
+        app.session.execute("file.new", &json!({"width": 400, "height": 300})).unwrap();
+        let id =
+            app.session.execute("path.create", &json!({"anchors": [{"x": 100, "y": 150}, {"x": 300, "y": 150}]})).unwrap()["id"].as_u64().unwrap();
+        app.session.execute("select.none", &json!({})).unwrap();
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, vec![]);
+        let xf = Xf::new(app.canvas_rect.unwrap(), app.view().unwrap());
+        let brush = |app: &VectorcraftApp| {
+            let st = app.session.active().unwrap();
+            st.doc.node(vectorcraft_doc::NodeId(id)).unwrap().appearance.stroke().and_then(|s| s.brush.clone())
+        };
+        let drop = |app: &mut VectorcraftApp, at: Point| {
+            let at = xf.to_screen(at);
+            egui::DragAndDrop::set_payload(&ctx, widgets::PanelDrag::Brush { name: "Arrow".into(), def: json!({}) });
+            let up = egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() };
+            frame(app, &ctx, vec![egui::Event::PointerMoved(at), up]);
+        };
+        // Off the path: nothing.
+        drop(&mut app, Point::new(200.0, 250.0));
+        assert_eq!(brush(&app), None);
+        // On it: the path's stroke takes the brush.
+        drop(&mut app, Point::new(200.0, 150.0));
+        assert_eq!(brush(&app).as_deref(), Some("Arrow"));
     }
 
     #[test]

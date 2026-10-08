@@ -24,6 +24,14 @@ How the web shell (`apps/vectorcraft-web/src/web.rs`) differs from desktop:
 - **No control server:** browsers can't listen on TCP. To automate the web build, drive headless Chrome with `--remote-debugging-port`.
 - Quick smoke test: `"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --enable-unsafe-webgpu --screenshot=web.png --window-size=1440,900 --virtual-time-budget=15000 http://127.0.0.1:8766/` (headless Chrome on macOS gets a real WebGPU adapter).
 
+## Desktop graphics processor
+
+The canvas is rasterized on the CPU (`vectorcraft-render`, vello_cpu); the GPU (wgpu, through eframe) only composites the canvas texture and draws the UI. The desktop app (`apps/vectorcraft/src/main.rs`) therefore asks wgpu for the **power-saving** adapter by default, which is the integrated GPU on hybrid-graphics laptops. Presenting frames rendered on a discrete GPU through the integrated one made the window flicker on some laptops (#306). A machine with one GPU gets that GPU either way.
+
+- **Preferences › Performance › Graphics Processor** (`gpuPreference`: `powerSaving` or `highPerformance`) picks the other one. The adapter is chosen when the window opens, so a change applies after a restart.
+- The `WGPU_POWER_PREF` environment variable (`low`, `high` or `none`) overrides the preference.
+- Help › About and the control channel's `ui.inspect` (`graphicsAdapter`) show the adapter in use, and the app logs it at startup.
+
 ## Fonts: craft-fonts (optional build input)
 
 Font files are never committed to this repository. Fonts shared by the Crafting Apps live in
@@ -66,8 +74,9 @@ text at render time from one catalog per language (`i18n/<code>.tsv`; the format
 always use the English ids and labels, so agents and scripts never see translated text.
 
 Languages shipped: English (`en`, the source), Traditional Chinese (`zh-hant`, complete, in the vocabulary used
-in Taiwan; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-*` locales all resolve to it), Czech (`cs`) and Japanese (`ja`), every menu
-label for both. Untranslated text falls back to English until its rows are
+in Taiwan; `zh-TW`, `zh-HK`, `zh-MO` and `zh-Hant-*` locales all resolve to it), Japanese (`ja`, complete),
+Czech (`cs`, every menu label) and Brazilian Portuguese (`pt-br`, every menu label and every `tl!` literal).
+Untranslated text falls back to English until its rows are
 added. Simplified Chinese locales
 (`zh-CN`, `zh-SG`, `zh-Hans`) fall back to English until a `zh-hans` catalog is registered: the resolver already
 tells the two scripts apart, so the Traditional catalog is never shown to a Simplified locale.
@@ -170,3 +179,25 @@ Untrusted input has property tests that must never panic:
 CI runs a few dozen cases each. Before touching an importer, run a deeper search, e.g.
 `PROPTEST_CASES=20000 cargo test --release -p vectorcraft-engine --test import_fuzz`. When it finds a
 panic, fix the code and add the input as a regular test.
+
+## Bidirectional type
+
+Point, area and path type lay out Hebrew and Arabic with the Unicode bidirectional algorithm
+(`unicode-bidi`, in `crates/text/src/layout.rs`). Each paragraph's base direction is its
+`ParaStyle::direction` (Paragraph panel › Left-to-Right / Right-to-Left Paragraph Direction, shown
+with Preferences › Type › Show Indic Options; `text.setFormat {direction}`), else its first strong
+character. Text is shaped in logical order, right-to-left runs right to left (`shape.rs` splits
+segments by bidi level and script), lines are broken in logical order and then each line's whole
+shaping clusters are put in visual order. Stored text, undo and style ranges stay logical; the
+caret, selection, hit testing and arrow keys follow the visual order. A paragraph with nothing
+right to left in it skips the algorithm, so plain text pays nothing for it.
+
+Alignment buttons are physical (Align Left is left in either direction). New type
+(`text.create`, the Type tools) is aligned `Justify::Auto`, the start of each paragraph's direction:
+Hebrew grows to the left of a point type's anchor. Imported text keeps its own alignment, and SVG
+import pins the direction SVG implies (left to right unless `direction: rtl`).
+
+Vertical type keeps its logical order down the column. SVG export outlines text with right-to-left
+lines (with a warning) until it is written with `direction`/`unicode-bidi`; PDF and raster exports
+use the laid-out glyphs. No font is bundled for these scripts: the installed fonts' fallback
+covers them (the web build needs a font with that coverage).

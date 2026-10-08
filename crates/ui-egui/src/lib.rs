@@ -23,6 +23,7 @@ pub mod cursors;
 pub mod dialogs;
 pub mod dock;
 pub mod find_font;
+pub mod font_menu;
 pub mod i18n;
 pub mod icon_data;
 pub mod icons;
@@ -64,6 +65,8 @@ mod tests_distortkeys;
 #[cfg(test)]
 mod tests_docsetup;
 #[cfg(test)]
+mod tests_font_menu;
+#[cfg(test)]
 mod tests_fonts;
 #[cfg(test)]
 mod tests_home;
@@ -95,6 +98,8 @@ mod tests_puppetwarp;
 mod tests_recolor;
 #[cfg(test)]
 mod tests_recovery;
+#[cfg(test)]
+mod tests_removeanchors;
 #[cfg(test)]
 mod tests_save;
 #[cfg(test)]
@@ -293,6 +298,9 @@ pub struct VectorcraftApp {
     /// Windows and Linux: the window has no OS decorations, so the app bar is the title bar (drag,
     /// double-click to maximize, caption buttons) and invisible edge zones resize the window.
     pub custom_titlebar: bool,
+    /// The graphics adapter the window renders with ("name (backend)"), as the host reports it:
+    /// shown in Help › About and `ui.inspect` for GPU bug reports. `None` when unknown.
+    pub graphics_adapter: Option<String>,
     /// File → Place: picked files, the place cursor's thumbnails, the Control bar's image details.
     pub place: place::PlaceState,
     /// The Paste commands can paste from the system clipboard alone: it holds something to paste
@@ -367,6 +375,7 @@ impl VectorcraftApp {
             canvas_rect: None,
             hover_doc: None,
             custom_titlebar: false,
+            graphics_adapter: None,
             place: Default::default(),
             system_paste: false,
             system_paste_at: f64::NEG_INFINITY,
@@ -504,8 +513,19 @@ impl VectorcraftApp {
 
     /// Select a tool (also used by the toolbar and shortcuts).
     pub fn select_tool(&mut self, id: &str) {
+        self.change_tool(id, true);
+    }
+
+    /// Go back to tool `id` after a temporary one, without choosing it afresh
+    /// ([`vectorcraft_engine::Session::switch_tool`]).
+    pub fn restore_tool(&mut self, id: &str) {
+        self.change_tool(id, false);
+    }
+
+    fn change_tool(&mut self, id: &str, choose: bool) {
         let v = self.view_info();
-        if let Err(e) = self.session.select_tool(id, v) {
+        let r = if choose { self.session.select_tool(id, v) } else { self.session.switch_tool(id, v) };
+        if let Err(e) = r {
             self.ui.status = e.to_string();
         }
         if let Some(g) = vectorcraft_tools::catalog::group_of(id)
@@ -822,6 +842,7 @@ impl VectorcraftApp {
             return;
         }
         let t0 = now_ms();
+        font_menu::end_stale_preview(self, &ctx);
         let t = theme::Tokens::get(&ctx);
         if self.ui.screen_mode < 2 {
             chrome::app_bar(self, ui);

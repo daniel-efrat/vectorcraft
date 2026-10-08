@@ -24,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Character / Paragraph",
             [],
             None,
-            "{ids?|id?, kerning?: 1/1000 em|\"auto\", baselineShift?: pt, hScale?: %, vScale?: %, rotation?: deg, underline?, strikethrough?, allCaps?, smallCaps?: bool, position?: \"normal\"|\"superscript\"|\"subscript\" (sizes from Document Setup), leftIndent?, rightIndent?, firstLineIndent?, spaceBefore?, spaceAfter?: pt, hyphenate?: bool}",
+            "{ids?|id?, kerning?: 1/1000 em|\"auto\", baselineShift?: pt, hScale?: %, vScale?: %, rotation?: deg, underline?, strikethrough?, allCaps?, smallCaps?: bool, position?: \"normal\"|\"superscript\"|\"subscript\" (sizes from Document Setup), leftIndent?, rightIndent?, firstLineIndent?, spaceBefore?, spaceAfter?: pt, hyphenate?: bool, mojikumi?: \"none\"|\"lineEndHalf\" (Japanese punctuation spacing), direction?: \"auto\"|\"leftToRight\"|\"rightToLeft\" (paragraph direction; auto: from each paragraph's first strong character)}",
             has_doc,
             set_format
         ),
@@ -54,15 +54,25 @@ fn artboard_duplicate(s: &mut Session, p: &Value) -> Result<Value> {
     let index = s.edit("Duplicate Artboard", |d, _| {
         let src = d.artboards.get(i).cloned().ok_or_else(|| EngineError::Other("no such artboard".into()))?;
         let right = d.artboards.iter().map(|a| a.rect.x1).fold(f64::MIN, f64::max);
-        let mut a = src.clone();
-        a.id = d.artboards.iter().map(|a| a.id).max().unwrap_or(0) + 1;
-        a.name = format!("{} copy", src.name);
         let dx = right + 20.0 - src.rect.x0;
-        a.rect = vectorcraft_geom::Rect::new(src.rect.x0 + dx, src.rect.y0, src.rect.x1 + dx, src.rect.y1);
-        d.artboards.push(a);
-        Ok(d.artboards.len() - 1)
+        Ok(push_artboard_copy(d, &src, vectorcraft_geom::Rect::new(src.rect.x0 + dx, src.rect.y0, src.rect.x1 + dx, src.rect.y1)))
     })?;
     Ok(json!({"index": index}))
+}
+
+/// Add a copy of artboard `src` at `rect`, named `<name> copy` (`<name> copy 2`… when taken),
+/// with an id of its own → its index.
+pub(crate) fn push_artboard_copy(d: &mut vectorcraft_doc::Document, src: &vectorcraft_doc::Artboard, rect: vectorcraft_geom::Rect) -> usize {
+    let mut a = src.clone();
+    a.id = d.artboards.iter().map(|a| a.id).max().unwrap_or(0).saturating_add(1);
+    let taken = |name: &str| d.artboards.iter().any(|a| a.name == name);
+    a.name = std::iter::once(format!("{} copy", src.name))
+        .chain((2u64..).map(|i| format!("{} copy {i}", src.name)))
+        .find(|name| !taken(name))
+        .unwrap_or_default();
+    a.rect = rect;
+    d.artboards.push(a);
+    d.artboards.len() - 1
 }
 
 // ---------- text ----------
@@ -101,11 +111,30 @@ fn set_format(s: &mut Session, p: &Value) -> Result<Value> {
         "spaceBefore",
         "spaceAfter",
         "hyphenate",
+        "mojikumi",
+        "direction",
     ];
     if !keys.iter().any(|k| p.get(*k).is_some()) {
         return Err(bad(C, "nothing to change"));
     }
     let (position, small_caps) = super::docsetup::script_params(p, &s.doc()?.doc.setup, C)?;
+    let mojikumi = match p.get("mojikumi") {
+        None => None,
+        Some(v) => Some(match v.as_str() {
+            Some("none") => vectorcraft_doc::Mojikumi::None,
+            Some("lineEndHalf") => vectorcraft_doc::Mojikumi::LineEndHalf,
+            _ => return Err(bad(C, "`mojikumi` must be \"none\" or \"lineEndHalf\"")),
+        }),
+    };
+    let direction = match p.get("direction") {
+        None => None,
+        Some(v) => Some(match v.as_str() {
+            Some("auto") => None,
+            Some("leftToRight") => Some(vectorcraft_doc::ParaDirection::LeftToRight),
+            Some("rightToLeft") => Some(vectorcraft_doc::ParaDirection::RightToLeft),
+            _ => return Err(bad(C, "`direction` must be \"auto\", \"leftToRight\" or \"rightToLeft\"")),
+        }),
+    };
     s.edit("Character", |d, _| {
         for id in &ids {
             let Some(NodeKind::Text(t)) = d.node_mut(*id).map(|n| &mut n.kind) else { continue };
@@ -160,6 +189,12 @@ fn set_format(s: &mut Session, p: &Value) -> Result<Value> {
             }
             if let Some(v) = flag("hyphenate") {
                 para.hyphenate = v;
+            }
+            if let Some(v) = mojikumi {
+                para.mojikumi = v;
+            }
+            if let Some(v) = direction {
+                para.direction = v;
             }
             super::typecmd::refresh_bounds(t);
         }

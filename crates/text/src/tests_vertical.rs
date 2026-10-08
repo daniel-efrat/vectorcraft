@@ -261,3 +261,106 @@ fn japanese_numbers_keep_their_own_cells_down_the_column() {
         assert!(inks.center().x.abs() < 2.8, "{block} centred on the column: {inks:?}");
     }
 }
+
+/// Upright glyphs take their cell from the font's vertical metrics: the advance down the column,
+/// and where the glyph hangs from its vertical origin (VORG, or the glyph's top and top side
+/// bearing). Fonts without them keep one em and the em box centre.
+#[test]
+fn upright_glyphs_follow_the_fonts_vertical_metrics() {
+    use crate::test_fonts::{VERTICAL_FAMILY, VERTICAL_TALL, vertical_font};
+    for vorg in [false, true] {
+        let db = FontDb::with_font_dirs(vec![]);
+        db.add_font(vertical_font(vorg).unwrap());
+        let text = format!("{VERTICAL_TALL}{VERTICAL_TALL}");
+        let mut t = vertical(&text);
+        t.runs[0].style.font_family = VERTICAL_FAMILY.into();
+        let l = layout(&db, &t);
+        let step = l.glyphs[1].origin.y - l.glyphs[0].origin.y;
+        assert!((step - 28.0).abs() < 0.01, "1.4 em down the column at 20 pt (vorg {vorg}): {step}");
+        // The glyph hangs from its vertical origin, 1.1 em above the baseline: its top is
+        // (1.1 em − its own top) below the top of its cell.
+        let face = db.face(VERTICAL_FAMILY, "Regular").unwrap();
+        let (_, origin) = face.vertical_glyph(face.glyph_for(VERTICAL_TALL)).unwrap();
+        assert!((origin - 1100.0).abs() < 1.0, "vorg {vorg}: {origin}");
+        let top = db.outline(&face, face.glyph_for(VERTICAL_TALL)).bounding_box().y0; // y-down: −yMax
+        let cell_top = l.glyphs[0].origin.y;
+        let expected = cell_top + (1.1 + top / 1000.0) * 20.0;
+        assert!((ink(&l, 0).y0 - expected).abs() < 0.05, "vorg {vorg}: ink top {} vs {expected}", ink(&l, 0).y0);
+    }
+    // The same glyph in the font without vertical metrics: one em, as before.
+    let l = layout(FontDb::global(), &vertical("§§"));
+    assert!((l.glyphs[1].origin.y - l.glyphs[0].origin.y - 20.0).abs() < 0.01);
+}
+
+/// Mojikumi (JLREQ 3.1): with Line-end Punctuation Half Width, a closing mark ending a line is set
+/// half width, a closing mark followed by punctuation loses the space after it, and an opening
+/// bracket after another loses the space before it; vertical type the same way down the column.
+/// Needs a font with full-width Japanese punctuation (skipped without one).
+#[test]
+fn mojikumi_halves_line_end_and_consecutive_punctuation() {
+    use vectorcraft_doc::Mojikumi;
+    let lay = |text: &str, m: Mojikumi, vertical_type: bool| {
+        let mut t = TextObject::point(Point::ZERO, text, CharStyle { size: 20.0, ..CharStyle::default() });
+        t.xf = Affine::IDENTITY;
+        t.vertical = vertical_type;
+        t.para.mojikumi = m;
+        layout(FontDb::global(), &t)
+    };
+    let solid = lay("一。", Mojikumi::None, false);
+    if (solid.glyphs[1].advance - 20.0).abs() > 2.0 {
+        return; // no font with full-width punctuation here
+    }
+    for vertical_type in [false, true] {
+        let adv = |text: &str, m| lay(text, m, vertical_type).glyphs.iter().map(|g| g.advance).collect::<Vec<_>>();
+        // Line end: 。 half width.
+        assert!((adv("一。", Mojikumi::LineEndHalf)[1] - 10.0).abs() < 0.01, "vertical {vertical_type}");
+        assert!((adv("一。", Mojikumi::None)[1] - 20.0).abs() < 0.01);
+        // 」 before 「: the closing mark's space goes; 「 keeps its own.
+        let a = adv("一」「二", Mojikumi::LineEndHalf);
+        assert!((a[1] - 10.0).abs() < 0.01 && (a[2] - 20.0).abs() < 0.01, "{a:?}");
+        // 「「: the second bracket loses the space before it and is drawn half an em earlier.
+        let a = adv("「「一", Mojikumi::LineEndHalf);
+        assert!((a[0] - 20.0).abs() < 0.01 && (a[1] - 10.0).abs() < 0.01, "{a:?}");
+        let (on, off) = (lay("「「一", Mojikumi::LineEndHalf, vertical_type), lay("「「一", Mojikumi::None, vertical_type));
+        let along = |r: Rect| if vertical_type { r.y0 } else { r.x0 };
+        let moved = along(off.glyphs[1].outline.bounding_box()) - along(on.glyphs[1].outline.bounding_box());
+        assert!((moved - 10.0).abs() < 0.01, "vertical {vertical_type}: the second 「 is drawn half an em earlier ({moved})");
+        // Text without punctuation is untouched.
+        assert_eq!(adv("一二", Mojikumi::LineEndHalf), adv("一二", Mojikumi::None));
+    }
+}
+
+/// Mojikumi (JLREQ 3.2.2): a quarter em between Japanese and Latin letters or digits, either way
+/// round, horizontal and vertical; none inside a tate-chu-yoko block, none left at a line's end, and
+/// none with Mojikumi None. Needs a font with full-width Japanese (skipped without one).
+#[test]
+fn mojikumi_spaces_japanese_from_latin_by_a_quarter_em() {
+    use vectorcraft_doc::Mojikumi;
+    let lay = |text: &str, m: Mojikumi, vertical_type: bool| {
+        let mut t = TextObject::point(Point::ZERO, text, CharStyle { size: 20.0, ..CharStyle::default() });
+        t.xf = Affine::IDENTITY;
+        t.vertical = vertical_type;
+        t.para.mojikumi = m;
+        layout(FontDb::global(), &t)
+    };
+    if (lay("雅", Mojikumi::None, false).glyphs[0].advance - 20.0).abs() > 2.0 {
+        return; // no font with full-width Japanese here
+    }
+    for vertical_type in [false, true] {
+        let extra = |text: &str| -> Vec<f64> {
+            let (on, off) = (lay(text, Mojikumi::LineEndHalf, vertical_type), lay(text, Mojikumi::None, vertical_type));
+            on.glyphs.iter().zip(&off.glyphs).map(|(a, b)| a.advance - b.advance).collect()
+        };
+        // 雅楽 2026 年: after 楽 and after 6.
+        assert_eq!(extra("雅楽2026年").iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), [0.0, 5.0, 0.0, 0.0, 0.0, 5.0, 0.0]);
+        // Latin first, and nothing after the last character of the line.
+        assert_eq!(extra("AB雅").iter().map(|x| x.round()).collect::<Vec<_>>(), [0.0, 5.0, 0.0]);
+        assert_eq!(extra("雅A").iter().map(|x| x.round()).collect::<Vec<_>>(), [5.0, 0.0]);
+        // Punctuation takes no Japanese–Latin space (the closing bracket isn't at the line's end).
+        assert!(extra("「A」です").iter().all(|x| x.abs() < 0.01), "{:?}", extra("「A」です"));
+    }
+    // A tate-chu-yoko block is set as a Japanese character, with no space inside or around it.
+    let on = lay("第10回", Mojikumi::LineEndHalf, true);
+    let off = lay("第10回", Mojikumi::None, true);
+    assert!(on.glyphs.iter().zip(&off.glyphs).all(|(a, b)| (a.advance - b.advance).abs() < 0.01));
+}

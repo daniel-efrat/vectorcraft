@@ -89,6 +89,31 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
     ("view.goto8", "Saved View 8", "", "{} go to the 8. saved view"),
     ("view.goto9", "Saved View 9", "", "{} go to the 9. saved view"),
     ("view.goto10", "Saved View 10", "", "{} go to the 10. saved view"),
+    ("select.recall1", "Saved Selection 1", "", "{} select the 1. saved selection"),
+    ("select.recall2", "Saved Selection 2", "", "{} select the 2. saved selection"),
+    ("select.recall3", "Saved Selection 3", "", "{} select the 3. saved selection"),
+    ("select.recall4", "Saved Selection 4", "", "{} select the 4. saved selection"),
+    ("select.recall5", "Saved Selection 5", "", "{} select the 5. saved selection"),
+    ("select.recall6", "Saved Selection 6", "", "{} select the 6. saved selection"),
+    ("select.recall7", "Saved Selection 7", "", "{} select the 7. saved selection"),
+    ("select.recall8", "Saved Selection 8", "", "{} select the 8. saved selection"),
+    ("select.recall9", "Saved Selection 9", "", "{} select the 9. saved selection"),
+    ("select.recall10", "Saved Selection 10", "", "{} select the 10. saved selection"),
+    ("select.recall11", "Saved Selection 11", "", "{} select the 11. saved selection"),
+    ("select.recall12", "Saved Selection 12", "", "{} select the 12. saved selection"),
+    ("select.recall13", "Saved Selection 13", "", "{} select the 13. saved selection"),
+    ("select.recall14", "Saved Selection 14", "", "{} select the 14. saved selection"),
+    ("select.recall15", "Saved Selection 15", "", "{} select the 15. saved selection"),
+    ("select.recall16", "Saved Selection 16", "", "{} select the 16. saved selection"),
+    ("select.recall17", "Saved Selection 17", "", "{} select the 17. saved selection"),
+    ("select.recall18", "Saved Selection 18", "", "{} select the 18. saved selection"),
+    ("select.recall19", "Saved Selection 19", "", "{} select the 19. saved selection"),
+    ("select.recall20", "Saved Selection 20", "", "{} select the 20. saved selection"),
+    ("select.recall21", "Saved Selection 21", "", "{} select the 21. saved selection"),
+    ("select.recall22", "Saved Selection 22", "", "{} select the 22. saved selection"),
+    ("select.recall23", "Saved Selection 23", "", "{} select the 23. saved selection"),
+    ("select.recall24", "Saved Selection 24", "", "{} select the 24. saved selection"),
+    ("select.recall25", "Saved Selection 25", "", "{} select the 25. saved selection"),
     ("type.recentFont1", "Recent Font 1", "", "{} apply the 1. most recently used font"),
     ("type.recentFont2", "Recent Font 2", "", "{} apply the 2. most recently used font"),
     ("type.recentFont3", "Recent Font 3", "", "{} apply the 3. most recently used font"),
@@ -171,7 +196,13 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
     ("window.toolbarAdvanced", "Toolbar: Advanced / Basic", "", "{}"),
     ("window.taskBar", "Contextual Task Bar", "", "{}"),
     ("window.dock", "Panels", "Tab", "{} show/hide all panels"),
-    ("window.panel", "Show Panel", "", "{panel: id} e.g. layers, swatches, stroke"),
+    ("window.panel", "Show Panel", "", "{panel: id} e.g. layers, swatches, stroke (case-insensitive; display labels like \"Layers\" work too)"),
+    (
+        "window.collapseDock",
+        "Collapse Panels to Icons",
+        "",
+        "{collapsed?: bool} collapse the dock's Properties | Layers | Libraries group to icons (true), expand it (false) or toggle (omitted), as the double arrow at the top of the dock does; returns the new state",
+    ),
     ("window.brightness", "UI Brightness", "", "{brightness: dark|mediumDark|mediumLight|light}"),
     ("window.workspace", "Workspace", "", "{name} switch workspace (Essentials, Essentials Classic, Painting, …)"),
     ("window.workspace.reset", "Reset Essentials", "", "{} reset the current workspace"),
@@ -298,6 +329,30 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "Merge Graphic Styles…",
         "",
         "{names: [two or more styles]} open Graphic Style Options (dialog `graphicStyleOptions`, field `name`) to name the style OK merges from them (graphicStyle.merge)",
+    ),
+    (
+        "ui.layerOptions",
+        "Options for Selection…",
+        "",
+        "{ids?|id?} open Layer Options for Layers panel rows (default: the highlighted rows, else the current layer), filled in from the first: dialog `layerOptions`, fields name, color (a preset name such as \"Light Blue\" or #rrggbb), template, locked, visible, printable, preview, dimImages (bool), dimPercent (0–100); an object's row has name, visible and locked. OK runs layer.setProps (one undo step)",
+    ),
+    (
+        "ui.newLayer",
+        "New Layer Options…",
+        "",
+        "{sublayer?: bool} open Layer Options for a new layer (or a sublayer of the current layer), named and coloured as it would be: dialog `layerOptions` with mode new|newSublayer; OK runs layer.new or layer.newSublayer with the fields",
+    ),
+    (
+        "ui.layersPanelOptions",
+        "Panel Options…",
+        "",
+        "{} open the Layers panel's Panel Options: dialog `layersPanelOptions`, fields layersOnly, rowSize (small|medium|large|other), otherSize (12–100 pt), thumbLayers, thumbGroups, thumbObjects; OK applies them (kept with the UI state)",
+    ),
+    (
+        "ui.layersExpand",
+        "Expand Layers Panel Rows",
+        "",
+        "{ids?: [id…] (default: every row that holds others), open?: bool (default true)} open or close rows of the Layers panel, as clicking their triangles does → {count}",
     ),
     (
         "ui.tileEdgeColor",
@@ -681,6 +736,16 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
+/// Canonical panel id for `window.panel`: a dock tab's or an icon panel's id or display label,
+/// matched case-insensitively (`"Layers"`, `"swatches"`, `"Color Guide"`).
+fn normalize_panel(input: &str) -> Option<&'static str> {
+    let name = input.trim();
+    let tabs = DockTab::ALL.into_iter().map(|t| (t.info().0, t.info().1));
+    tabs.chain(ICON_PANELS.iter().map(|&(id, label, _)| (id, label)))
+        .find(|(id, label)| name.eq_ignore_ascii_case(id) || name.eq_ignore_ascii_case(label))
+        .map(|(id, _)| id)
+}
+
 /// Handle a UI command. `None` = not a UI command (the engine handles it).
 pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<Result<Value, String>> {
     if id == "app.language" {
@@ -803,6 +868,10 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
                 _ => Err("no such view".into()),
             }
         }
+        id if saved_selection_slot(id).is_some() => match saved_selection_name(app, id) {
+            Some(name) => app.run("select.recall", json!({ "name": name })),
+            None => Err("no such saved selection".into()),
+        },
         "view.snapToPixel" => flag(&mut app.ui.view.snap_to_pixel),
         "view.textThreads" => flag(&mut app.ui.view.text_threads),
         "type.hiddenCharacters" => flag(&mut app.ui.view.hidden_chars),
@@ -895,27 +964,39 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
             app.ui.control_bar = on;
             Ok(json!(on))
         }
+        "window.collapseDock" => {
+            let collapsed = match p.get("collapsed") {
+                None | Some(Value::Null) => !app.ui.dock_collapsed,
+                Some(Value::Bool(b)) => *b,
+                Some(_) => return Some(Err("collapsed must be true or false".into())),
+            };
+            crate::dock::set_collapsed(app, collapsed);
+            Ok(json!(collapsed))
+        }
         "window.panel" => {
-            let panel = s("panel").unwrap_or_default();
-            match panel.as_str() {
-                "properties" => {
-                    app.ui.dock_tab = DockTab::Properties;
-                    Ok(Value::Null)
-                }
-                "layers" => {
-                    app.ui.dock_tab = DockTab::Layers;
-                    Ok(Value::Null)
-                }
-                "libraries" => {
-                    app.ui.dock_tab = DockTab::Libraries;
-                    Ok(Value::Null)
-                }
-                p if ICON_PANELS.iter().any(|(id, _, _)| *id == p) => {
+            let raw = s("panel").unwrap_or_default();
+            // Canonical id (case-insensitive; display labels work too), then the
+            // dock tab it names, if any.
+            let canonical = normalize_panel(&raw);
+            let tab = canonical.and_then(DockTab::from_id);
+            match (canonical, tab) {
+                // A collapsed dock pops the panel out of its icon, like the icon panels.
+                (Some(p), Some(tab)) if app.ui.dock_collapsed => {
+                    app.ui.dock_tab = tab;
                     app.ui.open_panel = if app.ui.open_panel.as_deref() == Some(p) { None } else { Some(p.to_string()) };
                     app.ui.dock = true;
                     Ok(json!({"open": app.ui.open_panel}))
                 }
-                other => Err(format!("unknown panel `{other}`")),
+                (Some(_), Some(tab)) => {
+                    app.ui.dock_tab = tab;
+                    Ok(Value::Null)
+                }
+                (Some(p), None) => {
+                    app.ui.open_panel = if app.ui.open_panel.as_deref() == Some(p) { None } else { Some(p.to_string()) };
+                    app.ui.dock = true;
+                    Ok(json!({"open": app.ui.open_panel}))
+                }
+                (None, _) => Err(format!("unknown panel `{raw}`")),
             }
         }
         "window.brightness" => match s("brightness").as_deref().and_then(Brightness::parse) {
@@ -1008,6 +1089,10 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
             crate::dialogs::graphic_style_options::open_merge(app, names.unwrap_or_default())
         }
         "ui.tileEdgeColor" => crate::dialogs::tile_edge_color::open(app),
+        "ui.layerOptions" => crate::dialogs::layer_options::open(app, p),
+        "ui.newLayer" => crate::dialogs::layer_options::open_new(app, p),
+        "ui.layersPanelOptions" => crate::dialogs::layers_panel_options::open(app),
+        "ui.layersExpand" => crate::panels::layers::expand(app, p),
         "ui.flattenTransparencyDialog" => {
             crate::dialogs::flatten::open(app);
             Ok(Value::Null)
@@ -1195,13 +1280,13 @@ pub fn checked(app: &VectorcraftApp, id: &str, p: &Value) -> Option<bool> {
         "window.taskBar" => app.ui.task_bar,
         "window.panel" => {
             let panel = p.get("panel").and_then(Value::as_str).unwrap_or("");
-            match panel {
-                "properties" => app.ui.dock_tab == DockTab::Properties,
-                "layers" => app.ui.dock_tab == DockTab::Layers,
-                "libraries" => app.ui.dock_tab == DockTab::Libraries,
-                _ => app.ui.open_panel.as_deref() == Some(panel),
+            let canonical = normalize_panel(panel);
+            match canonical.and_then(DockTab::from_id) {
+                Some(tab) if !app.ui.dock_collapsed => app.ui.dock_tab == tab,
+                _ => canonical.is_some_and(|id| app.ui.open_panel.as_deref() == Some(id)),
             }
         }
+        "window.collapseDock" => app.ui.dock_collapsed,
         "window.workspace" => p.get("name").and_then(Value::as_str) == Some(app.ui.workspace.as_str()),
         "window.brightness" => p.get("brightness").and_then(Value::as_str).and_then(Brightness::parse) == Some(app.ui.brightness),
         "view.slices.lock" => app.session.slices_locked(),
@@ -1247,6 +1332,7 @@ pub fn dynamic_label(app: &VectorcraftApp, id: &str, label: &str) -> String {
             let n: usize = id["view.goto".len()..].parse().unwrap_or(0);
             app.session.active().and_then(|d| n.checked_sub(1).and_then(|i| d.doc.views.get(i)).map(|v| v.name.clone())).unwrap_or_else(|| "—".into())
         }
+        id if saved_selection_slot(id).is_some() => saved_selection_name(app, id).unwrap_or_else(|| "—".into()),
         "view.artboards" => if v.artboards { "Hide Artboards" } else { "Show Artboards" }.into(),
         "view.rulers" => if v.rulers { "Hide Rulers" } else { "Show Rulers" }.into(),
         "view.boundingBox" => if v.bounding_box { "Hide Bounding Box" } else { "Show Bounding Box" }.into(),
@@ -1304,6 +1390,7 @@ fn shows_a_name(id: &str, label: &str) -> bool {
         crate::dialogs::perspective_presets::SLOT,
     ];
     SLOTS.iter().any(|s| id.starts_with(s))
+        || saved_selection_slot(id).is_some()
         || matches!(id, "text.setStyle" | "plugin.dialog")
         || (id == "window.workspace" && !crate::workspaces::is_builtin(label))
         || (matches!(id, "effect.apply" | "effect.dialog") && vectorcraft_effects::plugin_effects().iter().any(|e| e.label == label))
@@ -1347,6 +1434,7 @@ pub fn display_label(app: &VectorcraftApp, id: &str, label: &str) -> String {
 /// User Defined swatch and graphic style libraries).
 fn hidden_when_disabled(id: &str) -> bool {
     id.starts_with("view.goto")
+        || saved_selection_slot(id).is_some()
         || id.starts_with("file.openRecent")
         || id.starts_with(crate::panels::swatches::USER_SLOT)
         || id.starts_with(crate::panels::graphic_styles::USER_SLOT)
@@ -1398,6 +1486,12 @@ const RECENT_IDS: [&str; io::MAX_RECENT_FILES] = [
     "file.openRecent30",
 ];
 
+/// The saved selection a `select.recallN` slot names (none past the document's last).
+fn saved_selection_name(app: &VectorcraftApp, id: &str) -> Option<String> {
+    let n = saved_selection_slot(id)?.checked_sub(1)?;
+    app.session.active()?.doc.saved_selections.get(n).map(|x| x.name.clone())
+}
+
 /// The recent file a `file.openRecentN` slot names (none past the preference's count).
 fn recent_slot<'a>(app: &'a VectorcraftApp, id: &str) -> Option<&'a String> {
     let n: usize = id.strip_prefix("file.openRecent")?.parse().ok()?;
@@ -1417,6 +1511,7 @@ pub fn listed_slots(app: &VectorcraftApp) -> usize {
     let user = |libs: Vec<swatchlib::LibraryInfo>| libs.iter().filter(|l| l.category == "user").count().min(10);
     let views = app.session.active().map_or(0, |d| d.doc.views.len().min(10));
     views
+        + app.session.active().map_or(0, |d| d.doc.saved_selections.len().min(SAVED_SELECTION_IDS.len()))
         + io::recent_files(app).len().min(RECENT_IDS.len())
         + user(swatchlib::libraries(&app.session))
         + user(stylelib::libraries(&app.session))
@@ -1453,6 +1548,40 @@ const PERSPECTIVE_SLOTS: [[&str; crate::dialogs::perspective_presets::SLOTS]; 3]
         "ui.perspectiveUserPreset3.5",
     ],
 ];
+
+/// Select → saved selections: the n-th saved selection of the active document.
+const SAVED_SELECTION_IDS: [&str; vectorcraft_engine::doc::SavedSelection::MAX] = [
+    "select.recall1",
+    "select.recall2",
+    "select.recall3",
+    "select.recall4",
+    "select.recall5",
+    "select.recall6",
+    "select.recall7",
+    "select.recall8",
+    "select.recall9",
+    "select.recall10",
+    "select.recall11",
+    "select.recall12",
+    "select.recall13",
+    "select.recall14",
+    "select.recall15",
+    "select.recall16",
+    "select.recall17",
+    "select.recall18",
+    "select.recall19",
+    "select.recall20",
+    "select.recall21",
+    "select.recall22",
+    "select.recall23",
+    "select.recall24",
+    "select.recall25",
+];
+
+/// The 1-based slot a `select.recallN` id stands for.
+fn saved_selection_slot(id: &str) -> Option<usize> {
+    id.strip_prefix("select.recall")?.parse().ok()
+}
 
 /// Type → Recent Fonts slots.
 const RECENT_FONT_IDS: [&str; 10] = [
@@ -1513,6 +1642,7 @@ pub fn enabled(app: &VectorcraftApp, id: &str) -> bool {
         id if id.starts_with("type.recentFont") => {
             id["type.recentFont".len()..].parse::<usize>().is_ok_and(|n| n >= 1 && n <= app.ui.recent_fonts.len()) && app.session.active().is_some()
         }
+        id if saved_selection_slot(id).is_some() => saved_selection_name(app, id).is_some(),
         id if id.starts_with("view.goto") => {
             id["view.goto".len()..].parse::<usize>().is_ok_and(|n| n >= 1 && app.session.active().is_some_and(|d| n <= d.doc.views.len()))
         }
@@ -1772,7 +1902,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
                         Sep,
                         c("Simplify…", "object.path.simplify"),
                         c("Add Anchor Points", "object.path.addAnchorPoints"),
-                        c("Remove Anchor Points", "path.deleteAnchors"),
+                        c("Remove Anchor Points", "path.removeAnchors"),
                         c("Divide Objects Below", "object.path.divideObjectsBelow"),
                         c("Split Into Grid…", "object.path.splitIntoGrid"),
                         Sep,
@@ -1956,9 +2086,8 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
                 sub("Type Orientation", vec![c("Horizontal", "type.orientation.horizontal"), c("Vertical", "type.orientation.vertical")]),
             ],
         ),
-        (
-            "Select",
-            vec![
+        ("Select", {
+            let mut v = vec![
                 c("All", "select.all"),
                 c("All on Active Artboard", "select.allOnArtboard"),
                 c("Deselect", "select.none"),
@@ -2013,9 +2142,12 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
                 todo("Start Global Edit"),
                 Sep,
                 c("Save Selection…", "select.save"),
-                todo("Edit Selection…"),
-            ],
-        ),
+                c("Edit Selection…", "select.editSaved"),
+                Sep,
+            ];
+            v.extend(SAVED_SELECTION_IDS.iter().map(|id| c("Saved Selection", id)));
+            v
+        }),
         ("Effect", effect_menu()),
         (
             "View",
@@ -2273,6 +2405,9 @@ pub fn context_items(app: &VectorcraftApp) -> Vec<Item> {
         if paths {
             v.extend([c("Join", "path.join"), c("Average…", "path.average")]);
         }
+        if !st.selection.anchors.is_empty() {
+            v.push(c("Remove Anchor Points", "path.removeAnchors"));
+        }
         if several {
             v.push(c("Make Clipping Mask", "object.clippingMask.make"));
         }
@@ -2343,14 +2478,16 @@ pub fn menu_bar(app: &mut VectorcraftApp, ui: &mut egui::Ui) -> f32 {
     let tree = menu_tree();
     let end = egui::MenuBar::new()
         .ui(ui, |ui| {
+            let mut titles = Vec::with_capacity(tree.len());
             for (i, (title, items)) in tree.iter().enumerate() {
                 let text = if i == 0 {
                     egui::RichText::new(tl!(title)).font(theme::semibold(13.0)).color(t.text)
                 } else {
                     egui::RichText::new(tl!(title)).size(13.0).color(t.text)
                 };
-                ui.menu_button(text, |ui| menu_body(app, ui, items, &mut clicked));
+                titles.push(ui.menu_button(text, |ui| menu_body(app, ui, items, &mut clicked)).response);
             }
+            switch_on_hover(ui.ctx(), &titles);
             ui.cursor().min.x
         })
         .inner;
@@ -2358,6 +2495,39 @@ pub fn menu_bar(app: &mut VectorcraftApp, ui: &mut egui::Ui) -> f32 {
         invoke(app, &id, p);
     }
     end
+}
+
+/// Whether the pointer at `p` is really over the menu title `title`: inside it, and with no
+/// popup above it (a tall menu that egui moves up can cover the bar; hovering that menu must
+/// not switch to the title under it).
+fn pointer_reaches_title(ctx: &egui::Context, title: &egui::Response, p: egui::Pos2) -> bool {
+    title.interact_rect.contains(p) && ctx.layer_id_at(p) == Some(title.layer_id)
+}
+
+/// Like a native menu bar: while one top-level menu is open, moving the pointer onto another
+/// title opens that menu instead (egui alone needs a click on each title).
+fn switch_on_hover(ctx: &egui::Context, titles: &[egui::Response]) {
+    let ids: Vec<egui::Id> = titles.iter().map(egui::Popup::default_response_id).collect();
+    let Some(open) = ids.iter().position(|id| egui::Popup::is_id_open(ctx, *id)) else {
+        return;
+    };
+    // `Response::hovered` is false while a menu's popup is open, so hit-test the titles here.
+    let Some(p) = ctx.pointer_hover_pos() else {
+        return;
+    };
+    // Only a moving pointer switches: one resting on a title leaves the open menu alone.
+    if ctx.input(|i| i.pointer.delta() == egui::Vec2::ZERO) {
+        return;
+    }
+    let Some(i) = titles.iter().position(|title| pointer_reaches_title(ctx, title, p)) else {
+        return;
+    };
+    if i != open
+        && let Some(id) = ids.get(i)
+    {
+        egui::Popup::open_id(ctx, *id);
+        ctx.request_repaint();
+    }
 }
 
 /// A top-level menu's popup: as wide as its widest item (label plus shortcut), at least 230 pt;
@@ -2410,7 +2580,20 @@ fn render_items(app: &VectorcraftApp, ui: &mut egui::Ui, items: &[Item], checks:
                     Some(false) => format!("     {label}"),
                     None => label,
                 };
-                let r = ui.add_enabled(en, egui::Button::new(text).shortcut_text(sc));
+                // Type → Font: each family's sample after its name (Enable in-menu font previews).
+                let sampled = p.get("font").and_then(Value::as_str).filter(|_| *id == "text.setStyle" && app.session.prefs.font_preview);
+                let r = match sampled {
+                    Some(family) => {
+                        let slot = ui.id().with(("font-sample", family));
+                        let button = egui::Button::new(text).right_text(egui::Atom::custom(slot, crate::font_menu::MENU_SAMPLE_SIZE));
+                        let out = ui.add_enabled_ui(en, |ui| button.atom_ui(ui)).inner;
+                        if let Some(rect) = out.rect(slot) {
+                            crate::font_menu::menu_item_sample(ui, rect, family);
+                        }
+                        out.response
+                    }
+                    None => ui.add_enabled(en, egui::Button::new(text).shortcut_text(sc)),
+                };
                 if r.clicked() {
                     *clicked = Some(click_target(label_of(it), id, p));
                     ui.close();
@@ -2524,6 +2707,19 @@ pub fn invoke(app: &mut VectorcraftApp, id: &str, p: Value) {
                     .run("ui.paramDialog", json!({"command": id, "label": "Edit Views", "params": {"name": name, "newName": "", "delete": false}}));
             }
             None => app.status("No saved views (View → New View…)"),
+        }
+        return;
+    }
+    // Save Selection…: a name dialog, starting from the first free "Selection N".
+    if id == "select.save" && p.as_object().is_none_or(|o| o.is_empty()) {
+        let name = app.session.active().map(|d| vectorcraft_engine::doc::SavedSelection::default_name(&d.doc.saved_selections)).unwrap_or_default();
+        let _ = app.run("ui.paramDialog", json!({"command": id, "label": "Save Selection", "params": {"name": name}}));
+        return;
+    }
+    // Edit Selection…: the saved selections in a list, to rename or delete.
+    if id == "select.editSaved" && p.as_object().is_none_or(|o| o.is_empty()) {
+        if let Err(e) = crate::dialogs::edit_selection::open(app) {
+            app.status(e);
         }
         return;
     }
@@ -2954,6 +3150,99 @@ pub fn menu_strings() -> std::collections::BTreeSet<String> {
 mod tests {
     use super::*;
 
+    /// One headless frame of the in-window menu bar; returns its titles (left to right) as
+    /// (rect, id of the title's popup).
+    fn bar_frame(app: &mut VectorcraftApp, ctx: &egui::Context, events: Vec<egui::Event>) -> Vec<(egui::Rect, egui::Id)> {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 700.0));
+        let mut layer = None;
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+            layer = Some(ui.layer_id());
+            menu_bar(app, ui);
+        });
+        out.textures_delta.clear();
+        let layer = layer.unwrap();
+        let mut titles: Vec<(egui::Rect, egui::Id)> = ctx.viewport(|vp| {
+            vp.prev_pass
+                .widgets
+                .get_layer(layer)
+                .filter(|w| w.sense.senses_click() && w.rect.top() < 30.0)
+                // `egui::Popup::default_response_id` of the title's response.
+                .map(|w| (w.rect, w.id.with("popup")))
+                .collect()
+        });
+        titles.sort_by(|a, b| a.0.left().total_cmp(&b.0.left()));
+        titles
+    }
+
+    fn open_titles(ctx: &egui::Context, titles: &[(egui::Rect, egui::Id)]) -> Vec<usize> {
+        (0..titles.len()).filter(|&i| egui::Popup::is_id_open(ctx, titles[i].1)).collect()
+    }
+
+    #[test]
+    fn hovering_another_title_switches_the_open_menu() {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        theme::install_fonts(&ctx);
+        theme::apply(&ctx, Default::default());
+        bar_frame(&mut app, &ctx, vec![]);
+        let titles = bar_frame(&mut app, &ctx, vec![]);
+        assert_eq!(titles.len(), menu_tree().len());
+        // 0 is the app menu, then File, Edit, Object.
+        let (file, edit, object) = (titles[1].0.center(), titles[2].0.center(), titles[3].0.center());
+        let frames = |app: &mut VectorcraftApp, events: Vec<egui::Event>| {
+            let mut t = bar_frame(app, &ctx, events);
+            for _ in 0..2 {
+                t = bar_frame(app, &ctx, vec![]);
+            }
+            t
+        };
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+
+        // Nothing open: hovering a title opens nothing.
+        let t = frames(&mut app, vec![egui::Event::PointerMoved(edit)]);
+        assert!(open_titles(&ctx, &t).is_empty());
+
+        // Click File, then move onto Edit and on to Object: each opens in turn, alone.
+        frames(&mut app, vec![egui::Event::PointerMoved(file)]);
+        frames(&mut app, vec![button(file, true)]);
+        let t = frames(&mut app, vec![button(file, false)]);
+        assert_eq!(open_titles(&ctx, &t), vec![1], "a click opens File");
+        let t = frames(&mut app, vec![egui::Event::PointerMoved(edit)]);
+        assert_eq!(open_titles(&ctx, &t), vec![2], "hovering Edit opens it and closes File");
+        let t = frames(&mut app, vec![egui::Event::PointerMoved(object)]);
+        assert_eq!(open_titles(&ctx, &t), vec![3], "hovering Object opens it and closes Edit");
+
+        // A pointer resting on a title doesn't switch: File opened another way (the keyboard)
+        // stays open while the pointer stays still over Object.
+        egui::Popup::open_id(&ctx, t[1].1);
+        let t = frames(&mut app, vec![]);
+        assert_eq!(open_titles(&ctx, &t), vec![1], "a still pointer leaves the open menu alone");
+    }
+
+    #[test]
+    fn a_popup_covering_a_title_does_not_switch_menus() {
+        let ctx = egui::Context::default();
+        let p = egui::pos2(90.0, 12.0);
+        let mut reaches = (true, false);
+        // The popup becomes hit-testable once egui has laid it out: draw a few frames.
+        for _ in 0..3 {
+            let raw =
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))), ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let ctx = ui.ctx().clone();
+                let covered = ui.interact(egui::Rect::from_center_size(p, egui::vec2(80.0, 24.0)), egui::Id::new("covered"), egui::Sense::click());
+                let q = p + egui::vec2(0.0, 100.0);
+                let free = ui.interact(egui::Rect::from_center_size(q, egui::vec2(80.0, 24.0)), egui::Id::new("free"), egui::Sense::click());
+                egui::Area::new(egui::Id::new("popup")).order(egui::Order::Foreground).fixed_pos(p - egui::vec2(10.0, 10.0)).show(&ctx, |ui| {
+                    ui.allocate_space(egui::vec2(20.0, 20.0));
+                });
+                reaches = (pointer_reaches_title(&ctx, &covered, p), pointer_reaches_title(&ctx, &free, q));
+            });
+            out.textures_delta.clear();
+        }
+        assert_eq!(reaches, (false, true));
+    }
+
     #[test]
     fn names_in_menus_are_not_interface_labels() {
         for (id, label) in [
@@ -2996,6 +3285,34 @@ mod tests {
     }
 
     #[test]
+    fn panel_ids_are_case_insensitive_and_labels_work() {
+        assert_eq!(normalize_panel("layers"), Some("layers"));
+        assert_eq!(normalize_panel("Layers"), Some("layers"));
+        assert_eq!(normalize_panel("LAYERS"), Some("layers"));
+        assert_eq!(normalize_panel("Swatches"), Some("swatches"));
+        assert_eq!(normalize_panel("swatches"), Some("swatches"));
+        assert_eq!(normalize_panel("Color Guide"), Some("colorGuide"));
+        assert_eq!(normalize_panel("colorguide"), Some("colorGuide"));
+        assert_eq!(normalize_panel("  Stroke  "), Some("stroke"));
+        assert_eq!(normalize_panel("nope"), None);
+
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        app.run("window.panel", json!({"panel": "Layers"})).unwrap();
+        assert_eq!(app.ui.dock_tab, crate::state::DockTab::Layers);
+        app.run("window.panel", json!({"panel": "Swatches"})).unwrap();
+        assert_eq!(app.ui.open_panel.as_deref(), Some("swatches"));
+        assert!(checked(&app, "window.panel", &json!({"panel": "Swatches"})).unwrap());
+        assert!(app.run("window.panel", json!({"panel": "nope"})).is_err());
+        // A collapsed dock pops the panel out of its icon, by canonical id.
+        app.ui.dock_collapsed = true;
+        app.run("window.panel", json!({"panel": "Layers"})).unwrap();
+        assert_eq!(app.ui.open_panel.as_deref(), Some("layers"));
+        assert!(checked(&app, "window.panel", &json!({"panel": "Layers"})).unwrap());
+        app.ui.dock_collapsed = false;
+    }
+
+    #[test]
     fn saved_views_store_and_restore_the_view() {
         let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({})).unwrap();
@@ -3013,6 +3330,77 @@ mod tests {
         assert_eq!((v.zoom, v.center.x, v.center.y), (3.0, 120.0, 80.0));
         // Unused slots stay out of the menu listing agents see.
         assert!(!menu_entries(&app).iter().any(|e| e.command.as_deref() == Some("view.goto2")));
+    }
+
+    fn app_with_a_rectangle() -> VectorcraftApp {
+        let mut app = VectorcraftApp::new(vectorcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        app.run("shape.rectangle", json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap();
+        app
+    }
+
+    #[test]
+    fn save_selection_asks_for_a_name() {
+        let mut app = app_with_a_rectangle();
+        invoke(&mut app, "select.save", json!({}));
+        let d = app.ui.dialog.clone().expect("Save Selection dialog");
+        assert_eq!(
+            (d.kind.as_str(), d.str("__command"), d.str("__label"), d.str("name")),
+            ("command", "select.save".into(), "Save Selection".into(), "Selection 1".into())
+        );
+        // OK saves under the name typed.
+        let mut d = d;
+        d.fields.insert("name".into(), json!("Logo"));
+        app.ui.dialog = Some(d);
+        crate::dialogs::confirm(&mut app).unwrap();
+        assert_eq!(app.run("select.savedList", json!({})).unwrap(), json!(["Logo"]));
+        // The next one starts from the first free name.
+        invoke(&mut app, "select.save", json!({}));
+        assert_eq!(app.ui.dialog.as_ref().map(|d| d.str("name")), Some("Selection 1".into()));
+    }
+
+    #[test]
+    fn saved_selections_are_listed_at_the_bottom_of_the_select_menu() {
+        let mut app = app_with_a_rectangle();
+        app.run("shape.ellipse", json!({"x": 40, "y": 0, "width": 10, "height": 10})).unwrap();
+        // Nothing saved: no slot is listed or enabled.
+        assert!(!enabled(&app, "select.recall1"));
+        assert!(!menu_entries(&app).iter().any(|e| e.command.as_deref() == Some("select.recall1")));
+        app.run("select.save", json!({"name": "Ellipse"})).unwrap();
+        app.run("select.none", json!({})).unwrap();
+        app.run("select.all", json!({})).unwrap();
+        app.run("select.save", json!({"name": "Everything"})).unwrap();
+        assert!(enabled(&app, "select.recall1") && enabled(&app, "select.recall2") && !enabled(&app, "select.recall3"));
+        assert_eq!(dynamic_label(&app, "select.recall2", "Saved Selection"), "Everything");
+        // A name is shown as it is, not translated.
+        assert_eq!(display_label(&app, "select.recall2", "Saved Selection"), "Everything");
+        assert!(menu_entries(&app).iter().any(|e| e.command.as_deref() == Some("select.recall2")));
+        assert!(!menu_entries(&app).iter().any(|e| e.command.as_deref() == Some("select.recall3")));
+        // Choosing one selects its objects again.
+        app.run("select.none", json!({})).unwrap();
+        let r = app.run("select.recall2", json!({})).unwrap();
+        assert!(r["count"].as_u64().unwrap() >= 1);
+        assert_eq!(app.session.active().unwrap().selection.len(), 2);
+        // The native menu is rebuilt when the number of slots changes.
+        let listed = listed_slots(&app);
+        app.run("select.editSaved", json!({"name": "Ellipse", "delete": true})).unwrap();
+        assert_eq!(listed_slots(&app), listed - 1);
+        assert!(!enabled(&app, "select.recall2"));
+    }
+
+    #[test]
+    fn edit_selection_opens_its_dialog_on_the_saved_selections() {
+        let mut app = app_with_a_rectangle();
+        // Nothing saved yet: the item is off, and invoking it (palette, shortcut) only says so.
+        assert!(!enabled(&app, "select.editSaved"));
+        invoke(&mut app, "select.editSaved", json!({}));
+        assert!(app.ui.dialog.is_none());
+        assert!(app.ui.status.contains("No saved selections"), "{}", app.ui.status);
+        app.run("select.save", json!({"name": "Logo"})).unwrap();
+        assert!(enabled(&app, "select.editSaved"));
+        invoke(&mut app, "select.editSaved", json!({}));
+        let d = app.ui.dialog.clone().expect("Edit Selection dialog");
+        assert_eq!((d.kind.as_str(), d.str("orig0"), d.str("name0")), (crate::dialogs::edit_selection::KIND, "Logo".into(), "Logo".into()));
     }
 
     #[test]

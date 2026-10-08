@@ -75,12 +75,17 @@ is thousands of lines an agent pays for again on every change.
 
 | `uriTemplate` | Reads |
 |---|---|
-| `vectorcraft://object/{id}` | One layer or object with its children, bounds and paint |
+| `vectorcraft://object/{id}` | One layer or object with its children, bounds and paint: `document.node {id, summary: true}`, the node as `document.inspect` lists it |
 | `vectorcraft://command/{id}` | One command: label, menu path, shortcut, parameter description, enablement |
 | `vectorcraft://effect/{id}` | One live effect with its parameters and defaults |
 | `vectorcraft://swatch/{name}` | One swatch, colour, gradient or pattern swatch (percent-encode spaces) |
 
 An unknown URI is `-32002`; a template with no value, or a value that names nothing, is `-32602`.
+
+The same reads work as query commands through `run_command`: `document.node {id}` returns the object's full model
+JSON (geometry, appearance, every attribute) and `document.node {id, summary: true}` the compact summary
+`document.inspect` gives for it (id, name, kind, bounds, paint labels, children), without summarizing the whole
+document.
 
 ### Completions
 
@@ -157,7 +162,7 @@ objects' fills or strokes differ (`fillMixed` / `strokeMixed`, drawn as a "?" pr
 | `press_key` | `{key, mods?}` | Remote: a real key event. Headless: runs the command or tool bound to that shortcut, or sends the key to the busy tool (digits too: `5` while dragging with the Perspective Selection tool). |
 | `type_text` | `{text}` | Remote only. |
 | `invoke_menu` | `{command, params?}` | Invokes a menu item by command id. Includes UI commands such as `view.*` and `window.*` in remote mode. |
-| `open_panel` | `{panel}` | Remote only. |
+| `open_panel` | `{panel}` | Remote only. `panel` is a panel id (`layers`, `swatches`, `colorGuide`, …, as `window.panel` takes) or its display label (`"Color Guide"`), in any case. |
 | `screenshot` | `{path?, scale?, artboard?, window?}` | Returns MCP image content (`image/png`, base64) plus a text block. Renders the artboard; `window:true` captures the app window (remote only). |
 | `open_file` | `{path}` | Opens any readable file as a new active document: `.vectorcraft`/`.drawcraft`, `.vctemplate`, `.svg`/`.svgz`, `.pdf`/`.ai`, `.ait`, `.eps`, `.dxf`, `.emf`, `.wmf`, PNG, JPEG, GIF, WebP, TIFF, BMP (an image opens as a document of its pixel size). Templates (`.vctemplate`, `.ait`) open as a new untitled document. PDF, `.ai` and SVG files saved with Preserve Editing reopen as the document they carry. `run_command document.formats` lists the formats. |
 | `save_file` | `{path?}` | Runs `document.save`: the document's own file in its own format (native `.vectorcraft` unless it was opened from or saved as SVG, PDF or a restorable `.ai`; then `warnings` say what that format loses). A path's extension picks the format (`.vectorcraft`, `.vctemplate`, `.pdf`, `.svg`, `.svgz`, `.ai`: a PDF carrying the native document, which reopens editable). |
@@ -512,9 +517,21 @@ paints behind the clipped art and its stroke over it, not clipped, on screen and
 ```
 
 `layer.clippingMask.toggle {id?}` is the Layers panel's clipping mask button: the top object of the layer `id` (default:
-the one selected group, else the current layer) becomes its clipping path (unpainted, moved to the bottom of the layer,
+the one highlighted layer or group row, else the one selected group, else the current layer) becomes its clipping path (unpainted, moved to the bottom of the layer,
 so art added later is clipped too); called again it releases the mask. It returns `{clip}`, and the Layers panel
 underlines clipping-path names.
+
+## Saved selections
+
+Select → Save Selection… keeps the selected objects under a name, in the document: `select.save {name?}` (default
+the first free "Selection N"; an existing name is replaced with the current selection; at most 25 per document,
+names up to 255 characters) → `{name}`, one undo step. `select.savedList` lists the names in menu order, and
+`select.recall {name}` selects those objects again (ones deleted since are left out) → `{count}`. Edit Selection…
+renames and deletes: `select.editSaved {name, newName?, delete?}`, or several at once as
+`{edits: [{name, newName?, delete?}…]}` in one undo step, where every `name` is the name before the edit and the
+names must stay unique. In the desktop app the saved selections are listed at the bottom of the Select menu
+(`select.recall1` … `select.recall25`). A file's saved selections are checked when it opens: past 25, blank or
+repeated names, and ids the document doesn't have are dropped.
 
 ## Graphic styles
 
@@ -719,9 +736,59 @@ branch sets all of it. `paint.sampleColor {color}` puts a sampled colour (in its
 {"name":"run_command","arguments":{"command":"appearance.copyFrom","params":{"source":12,"ids":[7,8]}}}
 ```
 
+## The Layers panel: rows, layers and sublayers
+
+Every layer, sublayer, group and object is a row of the Layers panel. Sublayers are layers inside layers: they are not
+objects, so clicking or marquee-selecting art in a sublayer, Select All and the other Select commands take the art
+itself, and each sublayer has its own colour for the selection highlight. `document.inspect` lists the tree (layers
+report `color`, `template`, `printable`, `preview`, `dimImages` and `clip`), the `currentLayer` (where new art goes)
+and `layerRows`, the rows highlighted in the panel.
+
+- **Clicking rows** (not undo steps): `layer.setCurrent {id}` is a plain click on any row: it alone is highlighted
+  and its layer (the row itself when it is a layer or sublayer) becomes current. `layer.highlight {ids, mode?:
+  set|add|toggle}` is Shift-click (a range) and Ctrl/Cmd-click (toggle). Selecting art makes its layer current.
+  Without `ids`, the panel commands below act on the highlighted rows, else on the current layer.
+- **Selection column**: `layer.selectAll {id, add?}` selects a row's visible, unlocked art (a layer's sublayers'
+  too); `add` (Shift) adds it, or removes it when it's all selected.
+- **Eye and lock**: `layer.setProps {ids?, visible?, locked?, name?}` for any rows, plus Layer Options for layers:
+  `template` (also locks the layer and dims its images to 50% unless given), `printable`, `preview` (off: the layer
+  draws and is clicked in outline, Ctrl/Cmd-click its eye), `dimImages` (0–100, or false) and `color` (an index 0–26,
+  `#rrggbb` or a preset name). Several rows change in one undo step (a drag down the eye or lock column).
+- **Dragging rows**: `layer.move {ids, target, place?: above|below|inside, copy?}` moves rows beside a row or into a
+  layer or group (on top of its contents), keeping their stacking order; `copy` (Alt-drag) moves copies. Layers go
+  only in layers or at the top level and objects in layers and groups (an object placed beside a top-level layer goes
+  inside it); a row never goes into itself or a row inside it, and a locked layer or group takes nothing. Dragging the
+  selected-art square is `layer.move` with the selected objects. `node.move {id, parent?, index}` is the low-level
+  form with the same rules.
+- **Buttons**: `layer.new {name?, top?, …options}` (above the current layer at its level; `top` with Ctrl/Cmd),
+  `layer.newSublayer {parent?, name?, …options}` (on top of the parent's contents), `layer.delete {ids?}` (rows with
+  what they hold; the last layer stays), `layer.locate {id?}` (highlights the selected object's row; the panel opens
+  the rows around it) and `layer.clippingMask.toggle`.
+- **Panel menu**: `layer.duplicate {ids?}`, `layer.merge {ids?}` (into the layer highlighted last, keeping the
+  stacking order), `layer.flatten {id?}` (every other visible layer's art into one layer; hidden layers are deleted,
+  templates stay), `layer.collectInNew {ids?}`, `layer.releaseToLayers {id?, build?}` and
+  `layer.releaseToLayersBuild` (each object of a layer or group in a sublayer of its own; Build adds up copies),
+  `layer.reverse {ids?}`, `layer.template {ids?, on?}`, `layer.hideOthers` / `layer.showAll`,
+  `layer.outlineOthers` / `layer.previewAll`, `layer.lockOthers` / `layer.unlockAll` (Alt-clicking an eye or a lock
+  runs Hide or Lock Others for the row's layer, or Show or Unlock All when the others already are), `layer.pasteRemembersLayers`,
+  `object.isolate {id}` / `object.exitIsolation`.
+- **Dialogs and panel state** (control channel and the app's MCP): `ui.layerOptions {ids?}` and `ui.newLayer
+  {sublayer?}` open Layer Options (dialog `layerOptions`: name, color, template, locked, visible, printable, preview,
+  dimImages, dimPercent; OK is one undo step), `ui.layersPanelOptions` opens Panel Options (`layersPanelOptions`:
+  layersOnly, rowSize small|medium|large|other, otherSize, thumbLayers, thumbGroups, thumbObjects), and
+  `ui.layersExpand {ids?, open?}` opens or closes rows as their triangles do (Alt-click: everything inside).
+
+```json
+{"name":"run_command","arguments":{"command":"layer.newSublayer","params":{"name":"Shadows"}}}
+{"name":"run_command","arguments":{"command":"layer.move","params":{"ids":[12,15],"target":7,"place":"inside"}}}
+{"name":"run_command","arguments":{"command":"layer.setProps","params":{"ids":[7],"preview":false,"color":"Orange"}}}
+{"name":"run_command","arguments":{"command":"layer.highlight","params":{"ids":[3,7]}}}
+{"name":"run_command","arguments":{"command":"layer.merge","params":{}}}
+```
+
 ## Targeting layers and moving appearances
 
-`layer.target {id}` is the Layers panel's target circle: a layer gets its visible, unlocked art selected and is itself
+`layer.target {id}` is the Layers panel's target circle: a layer gets its visible, unlocked art (its sublayers' too) selected and is itself
 the target, so `appearance.*`, `effect.*`, `transparency.*` and the opacity-mask commands without `ids` act on the
 layer (its opacity, its own fills and effects, an opacity mask on the whole layer); a group or object is simply
 selected. `document.inspect` reports it as `target`, and any other selection change ends it.
@@ -884,6 +951,20 @@ paths and compound paths, and `path.reverse {reversed?}` makes subpaths run coun
 ```json
 {"name":"run_command","arguments":{"command":"attributes.set","params":{"ids":[12],"url":"https://example.com","imageMap":"rectangle"}}}
 {"name":"run_command","arguments":{"command":"path.setFillRule","params":{"rule":"evenOdd"}}}
+```
+
+## Removing anchor points
+
+`path.removeAnchors {}` (Object › Path › Remove Anchor Points) removes the direct-selected anchors (`select.anchors
+{id, anchors: [[subpath, anchor]…], mode?}`) without opening their paths, in one undo step, and answers
+`{removedObjects}` (paths left with no segment go). Each removed point's neighbours keep their handle directions and
+their facing handles are refitted so one cubic follows the two old segments; two straight sides become one.
+`path.removeAnchor {id, subpath?, anchor}` (the Delete Anchor Point tool) removes one anchor the same way, and
+`path.deleteAnchors {}` (the Delete key) deletes the selected anchors with their segments, opening closed paths there.
+
+```json
+{"name":"run_command","arguments":{"command":"select.anchors","params":{"id":12,"anchors":[[0,1],[0,3]]}}}
+{"name":"run_command","arguments":{"command":"path.removeAnchors","params":{}}}
 ```
 
 ## Registration and trim marks
@@ -1682,13 +1763,14 @@ Other files are run through a small PostScript interpreter (Level 3, first page 
 their width, caps, joins, miter limit and dashes (a fill and a stroke of the same path become one object), grey, RGB,
 CMYK, indexed and spot colours (a Separation ink becomes a spot swatch, painted at its tint), clips (clipping groups;
 `clipsave`/`cliprestore`), `gsave`/`grestore`, `save`/`restore`, transforms, procedures with `bind def`, loops,
-dictionaries, arrays and strings whose intervals share storage, resources (categories made from `Generic`,
-`resourceforall`), axial and radial shadings and shading patterns (gradients), images and image masks (data in the
-file through ASCII85, hex, run-length, Flate, LZW or DCT filters, or from procedures), and type as point type in the
-font the file names (embedded font programs are skipped). The artboard is the `%%HiResBoundingBox` (else
-`%%BoundingBox`; a letter page without one). A program the interpreter can't run (an operator it doesn't know, an
-error, a runaway loop) or that draws nothing comes in as its TIFF preview (palette previews with an alpha channel too)
-with a warning; without a preview, the art drawn up to the error is kept with a warning, and a file with none is
+dictionaries (the standard ones are values in `systemdict`; `dictstack`, `internaldict`), arrays and strings whose
+intervals share storage, resources (categories made from `Generic`, `resourceforall`), executable filters (`cvx exec`
+runs their data; `flushfile` skips it), axial and radial shadings and shading patterns (gradients), images and image
+masks (data in the file through ASCII85, hex, run-length, Flate, LZW or DCT filters, or from procedures), and type as
+point type in the font the file names (embedded font programs are skipped). The artboard is the `%%HiResBoundingBox`
+(else `%%BoundingBox`; a letter page without one). A program the interpreter can't run (an operator it doesn't know,
+an error, a runaway loop) or that draws nothing comes in as its TIFF preview (palette previews with an alpha channel
+too) with a warning; without a preview, the art drawn up to the error is kept with a warning, and a file with none is
 refused with a message saying why.
 
 ```json
@@ -1930,10 +2012,11 @@ keeps one axis), the left and right extents (separate: `extent` and `extentRight
 whole cells), the vertical extent and the cell size widget (on the line where the planes meet, a cell up, or more
 cells while they're small) reshape the grid; Lock Grid stops them. The Plane Switching Widget stays put in a corner
 of the document window (headless: the first artboard's top-left corner); a press on it picks the plane with any tool
-while the grid shows (a perspective tool shows it), and the keys 1–4 (`key` with `"1"`…`"4"`) pick the left,
-horizontal, right and no plane. `perspective.widget.options {show?, position?}` (Perspective Grid Options,
-double-click the tool) hides it or moves it to `topLeft`, `topRight`, `bottomLeft` or `bottomRight`, kept with the
-preferences (`prefs.get`/`prefs.set` key `perspectiveWidget`).
+while the grid shows (choosing a perspective tool shows it, and `perspective.grid.show` hides it again with the tool
+still chosen), and the keys 1–4 (`key` with `"1"`…`"4"`) pick the left, horizontal, right and no plane.
+`perspective.widget.options {show?, position?}` (Perspective Grid Options, double-click the tool) hides it or moves
+it to `topLeft`, `topRight`, `bottomLeft` or `bottomRight`, kept with the preferences (`prefs.get`/`prefs.set` key
+`perspectiveWidget`).
 
 ## Envelopes
 

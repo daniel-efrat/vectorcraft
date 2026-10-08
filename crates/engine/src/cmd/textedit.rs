@@ -372,7 +372,7 @@ fn create_in_path(s: &mut Session, p: &Value) -> Result<Value> {
         kind,
         xf: Affine::IDENTITY,
         runs: vec![TextRun { text, style }],
-        para: Default::default(),
+        para: super::create::new_type_para(),
         area: Default::default(),
         path_effect: Default::default(),
         wrap: Vec::new(),

@@ -109,6 +109,7 @@ pub fn num_field(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value:
     if !editing {
         buf = shown.clone();
     }
+    take_dialog_focus(ui, id, &buf);
     let resp = ui
         .allocate_ui_with_layout(vec2(width, 26.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.set_min_width(width);
@@ -135,6 +136,26 @@ pub fn num_field(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value:
     let commit = resp.lost_focus() && buf != shown;
     ui.data_mut(|d| d.insert_temp(id, buf.clone()));
     if commit { unit.parse(&buf) } else { None }
+}
+
+/// The flag `dialogs::show` raises while it draws the body of a dialog that has just opened; the
+/// first field drawn takes it ([`take_dialog_focus`]).
+pub(crate) fn dialog_focus_flag() -> egui::Id {
+    egui::Id::new("dialog-focus-first-field")
+}
+
+/// If field `id` (showing `text`) is the first field of a dialog that has just opened, give it the
+/// keyboard focus with all of `text` selected: typing replaces the value and Enter applies it.
+pub(crate) fn take_dialog_focus(ui: &Ui, id: egui::Id, text: &str) {
+    // A new window's first frame only measures its contents: nothing can take focus yet.
+    if ui.is_sizing_pass() || ui.data_mut(|d| d.remove_temp::<bool>(dialog_focus_flag())).is_none() {
+        return;
+    }
+    let mut st = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+    let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()));
+    st.cursor.set_char_range(Some(all));
+    st.store(ui.ctx(), id);
+    ui.memory_mut(|m| m.request_focus(id));
 }
 
 /// Numeric fields take the whole text, unit included, when they gain focus or are double-clicked
@@ -444,7 +465,7 @@ pub fn dropdown_with(
 /// The recessed combo box of [`dropdown`] showing `current`; `list` draws the options and returns
 /// the chosen one. A `searchable` list (a search field over a list it scrolls itself) stays open
 /// while it is clicked: it closes itself when an option is chosen.
-fn combo<R>(
+pub(crate) fn combo<R>(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
     current: &str,
@@ -1141,11 +1162,24 @@ pub enum PanelDrag {
     GraphicStyle(String),
     /// The selected art, dragged off the canvas with the Selection tool: the Graphic Styles panel
     /// makes a style of the first object (`graphicStyle.new`), the Symbols panel a symbol of it all
-    /// (`symbol.new`).
+    /// (`symbol.new`), the Swatches panel a pattern swatch of a copy (`object.pattern.make`) and the
+    /// Brushes panel an Art brush (`brush.new`).
     Art(Vec<vectorcraft_doc::NodeId>),
     /// A Symbols panel symbol: the canvas places an instance of it centred where it is dropped
     /// (`symbol.place`).
     Symbol(String),
+    /// A Brushes panel brush (`def`: its definition, for the chip at the pointer): the path it is
+    /// dropped on takes it (`brush.apply`).
+    Brush { name: String, def: serde_json::Value },
+}
+
+/// A panel list `zone` that takes art dragged off the canvas: outlined while art is held over it;
+/// → the dragged ids when it is released there.
+pub fn art_drop(ui: &Ui, zone: &Response) -> Option<Vec<u64>> {
+    let drag = zone.dnd_hover_payload::<PanelDrag>()?;
+    let PanelDrag::Art(ids) = &*drag else { return None };
+    ui.painter().rect_stroke(zone.rect, 0.0, Stroke::new(1.5, Tokens::get(ui.ctx()).accent), StrokeKind::Inside);
+    zone.dnd_release_payload::<PanelDrag>().map(|_| ids.iter().map(|id| id.0).collect())
 }
 
 /// The Swatches panel rows a drag from that panel moves: the swatch, None, Registration or colour

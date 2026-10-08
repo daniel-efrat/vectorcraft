@@ -252,6 +252,33 @@ fn pen_tool_draws_closed_path() {
     assert!(p.is_closed());
 }
 
+/// Auto Add/Delete: a Pen click on a selected path's segment adds an anchor, unless General →
+/// Disable Auto Add/Delete is on.
+#[test]
+fn pen_click_on_a_selected_path_adds_an_anchor_unless_disabled() {
+    let mut s = session();
+    let v = ViewInfo::default();
+    let r = s.execute("path.create", &json!({"anchors": [{"x": 10, "y": 100}, {"x": 110, "y": 100}, {"x": 210, "y": 100}]})).unwrap();
+    let id = NodeId(r["id"].as_u64().unwrap());
+    s.execute("select.all", &json!({})).unwrap();
+    s.select_tool("pen", v).unwrap();
+    let click = |s: &mut Session| {
+        s.pointer(&PointerEvent::new(PointerKind::Down, 60.0, 101.0), v).unwrap();
+        s.pointer(&PointerEvent::new(PointerKind::Up, 60.0, 101.0), v).unwrap();
+    };
+    click(&mut s);
+    let d = &s.doc().unwrap().doc;
+    assert_eq!(d.layers[0].children().unwrap().len(), 1);
+    assert_eq!(d.node(id).unwrap().path_data().unwrap().anchor_count(), 4);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("prefs.set", &json!({"key": "disableAutoAddDelete", "value": true})).unwrap();
+    s.execute("select.all", &json!({})).unwrap();
+    click(&mut s);
+    let d = &s.doc().unwrap().doc;
+    assert_eq!(d.layers[0].children().unwrap().len(), 2, "a new path starts");
+    assert_eq!(d.node(id).unwrap().path_data().unwrap().anchor_count(), 3);
+}
+
 #[test]
 fn direct_selection_moves_one_anchor() {
     let mut s = session();
@@ -283,6 +310,21 @@ fn inspect_lists_everything() {
     let v = s.execute("document.inspect", &json!({})).unwrap();
     assert_eq!(v["layers"][0]["children"][0]["kind"], "Rectangle");
     assert!(s.commands().len() > 100);
+}
+
+/// `document.node {summary: true}` answers the `document.inspect` shape for one node:
+/// the same fields the full-tree summary carries, without serializing the whole tree.
+#[test]
+fn document_node_summary_matches_inspect() {
+    let mut s = session();
+    let id = rect(&mut s, 0.0, 0.0, 10.0, 10.0).0;
+    let full = s.execute("document.node", &json!({"id": id})).unwrap();
+    assert!(full.get("bounds").is_none(), "full object JSON carries geometry, not bounds: {full}");
+    let summary = s.execute("document.node", &json!({"id": id, "summary": true})).unwrap();
+    let v = s.execute("document.inspect", &json!({})).unwrap();
+    let node = v["layers"][0]["children"].as_array().unwrap().iter().find(|n| n["id"] == id).cloned().unwrap();
+    assert_eq!(summary, node, "{summary} vs {node}");
+    assert!(s.execute("document.node", &json!({"id": 999999, "summary": true})).is_err());
 }
 
 /// Type reports the paint its characters show, and its own object-level paint apart from it.
@@ -542,4 +584,21 @@ fn a_panicking_command_rolls_back_instead_of_crashing() {
     let b = rect(&mut s, 200.0, 10.0, 50.0, 50.0);
     assert!(s.doc().unwrap().doc.node(b).is_some());
     assert_eq!(s.journal.last().map(|j| j.0.as_str()), Some("shape.rectangle"));
+}
+
+/// New layers and sublayers share one "Layer N" numbering, whatever art the document holds, and
+/// never repeat a name.
+#[test]
+fn new_layers_and_sublayers_are_numbered_together() {
+    let name = |s: &Session, id: &Value| s.doc().unwrap().doc.node(NodeId(id["id"].as_u64().unwrap())).unwrap().display_name().to_string();
+    let mut s = session();
+    let sub = s.execute("layer.newSublayer", &json!({})).unwrap();
+    assert_eq!(name(&s, &sub), "Layer 2", "not its parent's name");
+    for x in [0.0, 60.0, 120.0, 180.0, 240.0] {
+        rect(&mut s, x, 0.0, 50.0, 50.0);
+    }
+    let layer = s.execute("layer.new", &json!({})).unwrap();
+    assert_eq!(name(&s, &layer), "Layer 3", "after the sublayer, not a repeat of it");
+    let sub = s.execute("layer.newSublayer", &json!({})).unwrap();
+    assert_eq!(name(&s, &sub), "Layer 4", "the art doesn't count");
 }

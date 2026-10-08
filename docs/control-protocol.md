@@ -179,6 +179,14 @@ forward (`paint.toggleActive {fill}`) and open a popover with the Swatches panel
 a swatch clicked there runs `paint.setFill` / `paint.setStroke`. Panel keys (Color F6, Color Guide Shift+F3,
 Appearance Shift+F6, Graphic Styles Shift+F5, Stroke Cmd+F10, Gradient Cmd+F9, Transparency Cmd+Shift+F10) run
 `window.panel {panel}` and can be pressed with `ui.key`; `ui.menu.list` shows them on the Window menu's items.
+`window.panel` takes a panel id in any case or the panel's display label (`"Layers"`, `"Color Guide"`).
+
+Collapsing the dock: `window.collapseDock {collapsed?}` (the » at the top of the dock; omitted toggles) hides the
+Properties | Layers | Libraries group and puts its three panels as icons at the top of the icon column, under a «
+that expands them again. While collapsed, those icons and `window.panel {panel: "properties"|"layers"|"libraries"}`
+pop the panel out next to the column like the other icon panels (`ui.dock_collapsed`, `ui.open_panel` in
+`ui.inspect`); expanding with one popped out shows its tab. The state is saved with the preferences and in user
+workspaces; the built-in workspaces expand the dock.
 
 Flatten Transparency: `ui.flattenTransparencyDialog` opens the `flattenTransparency` dialog for the selection
 (fields `preset`: a preset name, setting it loads that preset's options; the option keys of
@@ -281,8 +289,13 @@ Paste placement: through the app, `edit.paste` and `edit.pasteWithoutFormatting`
 paste at the centre of the view. The Paste menu items are enabled while the system clipboard holds something to
 paste (SVG, PDF, text or a bitmap on the desktop; SVG on the web), even with nothing copied in the app (looked at up
 to four times a second; `ui.menu.list` shows it). The Layers panel menu (≡ on
-the dock's tab strip while Layers shows) lists the layer commands and Paste Remembers Layers
-(`layer.pasteRemembersLayers`, checked when on).
+the dock's tab strip while Layers shows) lists the layer commands (New Layer…, Duplicate and Delete Selection,
+Options for Selection…, clipping mask, isolation, Locate Object, Merge Selected, Flatten Artwork, Collect in New
+Layer, Release to Layers, Reverse Order, Template, Hide/Outline/Lock Others or Show/Preview/Unlock All Layers), Paste
+Remembers Layers (`layer.pasteRemembersLayers`, checked when on) and Panel Options…. Layer Options is the
+`layerOptions` dialog (`ui.layerOptions {ids?}`, `ui.newLayer {sublayer?}`), Panel Options the `layersPanelOptions`
+dialog (`ui.layersPanelOptions`), and `ui.layersExpand {ids?, open?}` opens or closes rows; see the Layers panel
+section of `docs/mcp.md` for the row commands (`layer.setCurrent`, `layer.highlight`, `layer.move`…).
 
 File Info: File → File Info… (`file.info` from the menu or Cmd+Alt+Shift+I; `ui.fileInfoDialog` for agents) opens the
 `fileInfo` dialog. Its fields are what `file.info` reports (`title`, `author`, `authorTitle`, `description`,
